@@ -1,0 +1,6 @@
+.git
+bin
+gocache-for-docker
+.vscode
+victoria-traces
+victoria-traces-data

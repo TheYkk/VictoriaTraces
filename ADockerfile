@@ -1,4 +1,4 @@
-FROM debian:12-slim AS runtime
+FROM debian:13-slim AS runtime
 RUN apt-get update -y \
   && apt-get install -y --no-install-recommends curl openssl ca-certificates \
   # Clean up.
