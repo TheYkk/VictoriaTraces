@@ -39,6 +39,9 @@ var (
 	logsqlQueryRequests = metrics.NewCounter(`vt_http_requests_total{path="/select/logsql/query"}`)
 	logsqlQueryDuration = metrics.NewSummary(`vt_http_request_duration_seconds{path="/select/logsql/query"}`)
 
+	logsqlProfileRequests = metrics.NewCounter(`vt_http_requests_total{path="/select/logsql/profile"}`)
+	logsqlProfileDuration = metrics.NewSummary(`vt_http_request_duration_seconds{path="/select/logsql/profile"}`)
+
 	logsqlStatsQueryRequests = metrics.NewCounter(`vt_http_requests_total{path="/select/logsql/stats_query"}`)
 	logsqlStatsQueryDuration = metrics.NewSummary(`vt_http_request_duration_seconds{path="/select/logsql/stats_query"}`)
 
@@ -127,6 +130,11 @@ func processSelectRequest(ctx context.Context, w http.ResponseWriter, r *http.Re
 		logsqlQueryRequests.Inc()
 		logsql.ProcessQueryRequest(ctx, w, r)
 		logsqlQueryDuration.UpdateDuration(startTime)
+		return true
+	case "/select/logsql/profile":
+		logsqlProfileRequests.Inc()
+		logsql.ProcessProfileRequest(ctx, w, r)
+		logsqlProfileDuration.UpdateDuration(startTime)
 		return true
 	case "/select/logsql/stats_query":
 		logsqlStatsQueryRequests.Inc()

@@ -43,6 +43,9 @@ Visit our [VictoriaTraces playground](https://play-vtraces.victoriametrics.com/)
 
 VictoriaTraces provides the same [HTTP endpoints](https://docs.victoriametrics.com/victorialogs/querying/#http-api) that VictoriaLogs provides.
 
+VictoriaTraces also provides `/select/logsql/profile` endpoint for inspecting the plan and the execution stats of LogsQL queries.
+See [LogsQL query profiling](#logsql-query-profiling).
+
 Additionally, [Jaeger Query Service JSON APIs](https://www.jaegertracing.io/docs/2.6/apis/#internal-http-json) and
 [Grafana Tempo HTTP APIs](https://grafana.com/docs/tempo/v2.10.x/api_docs/) (experimental) are available.
 
@@ -243,7 +246,7 @@ VictoriaTraces provides the following Tempo HTTP endpoints:
 - `/select/tempo/api/traces/{trace_id}` for fetching a single trace by its ID (v1).
 - `/select/tempo/api/v2/traces/{trace_id}` for fetching a single trace by its ID (v2, similar to v1 but with different data structure).
 - `/select/tempo/api/metrics/query_range` for evaluating a TraceQL metrics query over a time range.
-- `/select/tempo/api/profile` for inspecting the query plan and the execution stats of a TraceQL search query. See [query profiling](#query-profiling).
+- `/select/tempo/api/profile` for inspecting the query plan and the execution stats of a TraceQL search query. See [TraceQL query profiling](#traceql-query-profiling).
 
 #### Querying Examples
 
@@ -285,28 +288,25 @@ Here's a response example:
 {"series":[{"labels":[{"key":"name","value":{"stringValue":"GET"}}],"samples":[{"timestampMs":"1783567368000","value":346},{"timestampMs":"1783567404000","value":28.166666666666668}],"exemplars":[{"labels":[{"key":"trace:id","value":{"stringValue":"fca92157fc0d84fdaa960f9bc83634f8"}},{"key":"span:id","value":{"stringValue":"38546d070ac097e8"}}],"value":346,"timestampMs":"1783567368000"}]}],"metrics":{"inspectedBytes":"0","inspectedTraces":0,"totalJobs":0,"completedJobs":0},"status":"COMPLETE"}
 ```
 
-#### Query profiling
+## Query profiling
 
 > Query profiling is **experimental**. The set of the reported fields may change in future releases.
 
-The `/select/tempo/api/profile` endpoint reports how a TraceQL search query at [`/select/tempo/api/search`](#tempo-http-api) is planned and executed.
-It is intended for optimizing both queries and the stored data layout, similar to `EXPLAIN` / `EXPLAIN ANALYZE` in traditional databases.
+VictoriaTraces can report how a query is planned and executed, similar to `EXPLAIN` / `EXPLAIN ANALYZE` in traditional databases.
+It is intended for optimizing both queries and the stored data layout. The following endpoints are available:
 
-The endpoint accepts the same `q`, `start`, `end` and `limit` query args as `/select/tempo/api/search`, plus:
+- `/select/tempo/api/profile` for [TraceQL search queries](#traceql-query-profiling).
+- `/select/logsql/profile` for [LogsQL queries](#logsql-query-profiling).
+
+Both endpoints accept the following query args in addition to the args of the profiled API:
 
 - `mode=explain` (default) returns the query plan without reading the stored data.
-- `mode=analyze` executes the query, drops the returned spans and reports the execution stats. It can be also enabled via `analyze=true`.
+- `mode=analyze` executes the query, drops the returned rows and reports the execution stats. It can be also enabled via `analyze=true`.
 
-A TraceQL search request is executed in two stages, which are both reported by this endpoint:
-
-- `trace_id_search` selects `trace_id` values. It starts from the most recent one-minute window and increases the window by 5x
-  until enough traces are found or the requested `start` is reached.
-- `span_fetch` reads all the spans for the selected `trace_id` values. Its time range is extended by `-search.traceMaxDurationWindow`.
-
-Every stage contains the generated [LogsQL](https://docs.victoriametrics.com/victorialogs/logsql/) query, together with the queries
+The query plan contains the [LogsQL](https://docs.victoriametrics.com/victorialogs/logsql/) query, together with the query
 executed at `vtstorage` nodes and the pipes executed at `vtselect` in [cluster version](https://docs.victoriametrics.com/victoriatraces/cluster/).
 
-`mode=analyze` additionally reports for every executed query:
+`mode=analyze` additionally reports for every executed query, including subqueries:
 
 - the number of the input and the output rows and blocks per every pipeline operator;
 - the number of the selected and the skipped partitions, parts, index block headers and data blocks. These stats show how efficiently
@@ -316,6 +316,22 @@ executed at `vtstorage` nodes and the pipes executed at `vtselect` in [cluster v
 - the execution stats per every `vtstorage` node in [cluster version](https://docs.victoriametrics.com/victoriatraces/cluster/).
 
 The reported durations are the summed wall-clock time across all the worker goroutines. They are neither CPU time nor query duration.
+
+Note that `mode=analyze` reads the stored data in the same way as the regular query does, so it consumes the same amount of resources.
+
+In [cluster version](https://docs.victoriametrics.com/victoriatraces/cluster/) all the `vtstorage` nodes must be upgraded to the version supporting
+query profiling before using `mode=analyze`, since it relies on the `/internal/select/query_profile` endpoint at `vtstorage`.
+Regular queries aren't affected by this requirement.
+
+### TraceQL query profiling
+
+The `/select/tempo/api/profile` endpoint accepts the same `q`, `start`, `end` and `limit` query args as [`/select/tempo/api/search`](#tempo-http-api).
+
+A TraceQL search request is executed in two stages, which are both reported by this endpoint:
+
+- `trace_id_search` selects `trace_id` values. It starts from the most recent one-minute window and increases the window by 5x
+  until enough traces are found or the requested `start` is reached.
+- `span_fetch` reads all the spans for the selected `trace_id` values. Its time range is extended by `-search.traceMaxDurationWindow`.
 
 For example, the following command returns the query plan without reading the stored data:
 
@@ -332,21 +348,46 @@ curl -G http://<victoria-traces>:10428/select/tempo/api/profile \
   --data-urlencode 'mode=analyze'
 ```
 
-Note that `mode=analyze` reads the stored data in the same way as the regular search query does, so it consumes the same amount of resources.
+### LogsQL query profiling
+
+The `/select/logsql/profile` endpoint accepts the same query args as [`/select/logsql/query`](https://docs.victoriametrics.com/victorialogs/querying/#querying-logs)
+except of `format`, such as `query`, `start`, `end`, `time`, `limit`, `offset`, `extra_filters` and `extra_stream_filters`.
+The profiled query is built in the same way as at `/select/logsql/query`, and it is returned in the `executed_query` field.
+Use [`stats` pipe](https://docs.victoriametrics.com/victorialogs/logsql/#stats-pipe) in the query for profiling stats queries.
+
+All the queries executed by this endpoint are reported with the `logsql_query` stage. Subqueries such as `in(...)`
+are reported as separate queries, which are executed before the main query.
+
+For example, the following command returns the query plan without reading the stored data:
+
+```sh
+curl http://<victoria-traces>:10428/select/logsql/profile \
+  --data-urlencode 'query=_time:1h "resource_attr:service.name":=frontend error | stats by (name) count() hits'
+```
+
+while the following command also executes the query and returns its execution stats:
+
+```sh
+curl http://<victoria-traces>:10428/select/logsql/profile \
+  --data-urlencode 'query=_time:1h "resource_attr:service.name":=frontend error | stats by (name) count() hits' \
+  -d 'mode=analyze'
+```
+
+The `analysis` field contains the number of rows and blocks returned by the query.
+
+### Optimizing queries with profiles
 
 The following stats from `execution.query_stats` and `execution.queries[*].query_stats` are useful for optimizing queries:
 
 - `rows_processed` much bigger than `rows_found` means that the filters are evaluated for many rows which don't match.
   Add filters on [stream fields](https://docs.victoriametrics.com/victoriatraces/keyconcepts/#stream-fields) such as `resource.service.name`,
   since they skip whole blocks before reading them.
-- `partitions_time_skipped` and `parts_time_skipped` close to zero mean that the query time range covers almost all the stored data. Narrow down `start` and `end`.
+- `partitions_time_skipped` and `parts_time_skipped` close to zero mean that the query time range covers almost all the stored data. Narrow down the time range.
 - many `trace_id_search` queries mean that only a few matching traces were found in the recent windows, so the search window was extended many times.
   Narrow down the time range or make the query more specific.
 - `bytes_read_values` is the amount of column data read from disk. It can be reduced by more selective filters.
-
-In [cluster version](https://docs.victoriametrics.com/victoriatraces/cluster/) all the `vtstorage` nodes must be upgraded to the version supporting
-query profiling before using `mode=analyze`, since it relies on the `/internal/select/query_profile` endpoint at `vtstorage`.
-Regular queries aren't affected by this requirement.
+- an operator with high `exclusive_active_duration_nsecs` is the most expensive part of the query pipeline.
+  For example, move filters before heavy pipes such as `sort` or `stats`, so they process fewer rows.
 
 ## Hidden fields
 

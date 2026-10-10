@@ -321,7 +321,7 @@ func prepareTraceParentAndChildSpanData(tc *at.TestCase, sut at.VictoriaTracesWr
 func getServiceGraphRowsInsertedTotal(t *testing.T, sut at.VictoriaTracesWriteQuerier) int {
 	t.Helper()
 
-	selector := `vt_rows_ingested_total{type="internalinsert_servicegraph"}`
+	selector := `vt_rows_ingested_total{type="internalinsert_servicegraph",tenant="0:0"}`
 	switch tt := sut.(type) {
 	case *at.Vtsingle:
 		// use TryGetMetric instead of TryMetric, to allow retries.

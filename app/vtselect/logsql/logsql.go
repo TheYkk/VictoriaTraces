@@ -1199,14 +1199,7 @@ func ProcessQueryRequest(ctx context.Context, w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if limit > 0 {
-		// Add '| sort by (_time) desc | offset <offset> | limit <limit>' to the end of the query.
-		// This pattern is automatically optimized during query execution - see https://github.com/VictoriaMetrics/VictoriaLogs/issues/96 .
-		if ca.q.CanReturnLastNResults() {
-			ca.q.AddPipeSortByTimeDesc()
-		}
-		ca.q.AddPipeOffsetLimit(uint64(offset), uint64(limit))
-	}
+	addQueryOffsetLimit(ca.q, offset, limit)
 
 	var csvHeader []byte
 	if format == "csv" {
@@ -1302,6 +1295,19 @@ func ProcessQueryRequest(ctx context.Context, w http.ResponseWriter, r *http.Req
 
 	// This call is needed for the case when the response didn't return any results.
 	writeResponseHeadersOnce()
+}
+
+// addQueryOffsetLimit applies the offset and limit query args of /select/logsql/query to q.
+func addQueryOffsetLimit(q *logstorage.Query, offset, limit int) {
+	if limit <= 0 {
+		return
+	}
+	// Add '| sort by (_time) desc | offset <offset> | limit <limit>' to the end of the query.
+	// This pattern is automatically optimized during query execution - see https://github.com/VictoriaMetrics/VictoriaLogs/issues/96 .
+	if q.CanReturnLastNResults() {
+		q.AddPipeSortByTimeDesc()
+	}
+	q.AddPipeOffsetLimit(uint64(offset), uint64(limit))
 }
 
 func appendCSVRow(dst []byte, columns []logstorage.BlockColumn, rowIdx int) []byte {
