@@ -308,7 +308,7 @@ executed at `vtstorage` nodes and the pipes executed at `vtselect` in [cluster v
 
 `mode=analyze` additionally reports for every executed query:
 
-- the number of the processed and the returned rows, blocks and bytes per every pipeline operator;
+- the number of the input and the output rows and blocks per every pipeline operator;
 - the number of the selected and the skipped partitions, parts, index block headers and data blocks. These stats show how efficiently
   the query time range and [stream fields](https://docs.victoriametrics.com/victoriatraces/keyconcepts/#stream-fields) prune the stored data;
 - the number of the scheduled, the processed and the canceled data blocks;
@@ -333,6 +333,20 @@ curl -G http://<victoria-traces>:10428/select/tempo/api/profile \
 ```
 
 Note that `mode=analyze` reads the stored data in the same way as the regular search query does, so it consumes the same amount of resources.
+
+The following stats from `execution.query_stats` and `execution.queries[*].query_stats` are useful for optimizing queries:
+
+- `rows_processed` much bigger than `rows_found` means that the filters are evaluated for many rows which don't match.
+  Add filters on [stream fields](https://docs.victoriametrics.com/victoriatraces/keyconcepts/#stream-fields) such as `resource.service.name`,
+  since they skip whole blocks before reading them.
+- `partitions_time_skipped` and `parts_time_skipped` close to zero mean that the query time range covers almost all the stored data. Narrow down `start` and `end`.
+- many `trace_id_search` queries mean that only a few matching traces were found in the recent windows, so the search window was extended many times.
+  Narrow down the time range or make the query more specific.
+- `bytes_read_values` is the amount of column data read from disk. It can be reduced by more selective filters.
+
+In [cluster version](https://docs.victoriametrics.com/victoriatraces/cluster/) all the `vtstorage` nodes must be upgraded to the version supporting
+query profiling before using `mode=analyze`, since it relies on the `/internal/select/query_profile` endpoint at `vtstorage`.
+Regular queries aren't affected by this requirement.
 
 ## Hidden fields
 

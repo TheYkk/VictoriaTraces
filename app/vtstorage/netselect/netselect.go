@@ -146,13 +146,14 @@ func newStorageNode(s *Storage, index int, addr string, ac *promauth.Config, isT
 
 func (sn *storageNode) runQuery(qctx *logstorage.QueryContext, processBlock func(db *logstorage.DataBlock)) (err error) {
 	profileCollector := qctx.QueryProfileCollector()
-	requestStage, _ := qctx.QueryProfileStage()
-	requestQuery := qctx.Query.String()
 	protocolVersion := QueryProtocolVersion
 	path := "/internal/select/query"
+	var requestStage, requestQuery string
 	if profileCollector != nil {
 		protocolVersion = QueryProfileProtocolVersion
 		path = "/internal/select/query_profile"
+		requestStage, _ = qctx.QueryProfileStage()
+		requestQuery = qctx.Query.String()
 	}
 	args := sn.getCommonArgs(protocolVersion, qctx)
 
@@ -192,10 +193,10 @@ func (sn *storageNode) runQuery(qctx *logstorage.QueryContext, processBlock func
 				// The end of response stream.
 				if profileCollector != nil {
 					if !gotQueryStats {
-						return newUnavailableStorageNodeError("missing terminal query stats block in response from %q", reqURL)
+						return fmt.Errorf("missing terminal query stats block in response from %q", reqURL)
 					}
 					if !gotQueryProfile {
-						return newUnavailableStorageNodeError("missing terminal query profile block in response from %q", reqURL)
+						return fmt.Errorf("missing terminal query profile block in response from %q", reqURL)
 					}
 					if queryProfileError != "" {
 						return fmt.Errorf("remote query at %q failed: %s", reqURL, queryProfileError)
@@ -203,7 +204,7 @@ func (sn *storageNode) runQuery(qctx *logstorage.QueryContext, processBlock func
 				}
 				return nil
 			}
-			return newUnavailableStorageNodeError("cannot read block size from %q: %s", reqURL, err)
+			return fmt.Errorf("cannot read block size from %q: %w", reqURL, err)
 		}
 		blockLen := encoding.UnmarshalUint64(dataLenBuf[:])
 		if blockLen > math.MaxInt {
@@ -212,7 +213,7 @@ func (sn *storageNode) runQuery(qctx *logstorage.QueryContext, processBlock func
 
 		buf = slicesutil.SetLength(buf, int(blockLen))
 		if _, err := io.ReadFull(responseBody, buf); err != nil {
-			return newUnavailableStorageNodeError("cannot read block with size of %d bytes from %q: %s", blockLen, reqURL, err)
+			return fmt.Errorf("cannot read block with size of %d bytes from %q: %w", blockLen, reqURL, err)
 		}
 
 		src := buf
@@ -273,13 +274,6 @@ func (sn *storageNode) runQuery(qctx *logstorage.QueryContext, processBlock func
 				return fmt.Errorf("unexpected query response marker %d received from %q", marker, reqURL)
 			}
 		}
-	}
-}
-
-func newUnavailableStorageNodeError(format string, args ...any) error {
-	return &httpserver.ErrorWithStatusCode{
-		Err:        fmt.Errorf(format, args...),
-		StatusCode: http.StatusBadGateway,
 	}
 }
 

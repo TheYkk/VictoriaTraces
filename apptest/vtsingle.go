@@ -46,6 +46,25 @@ type Vtsingle struct {
 // instance state with runtime values extracted from the application log (such
 // as httpListenAddr).
 func StartVtsingle(instance string, flags, env []string, cli *Client) (*Vtsingle, error) {
+	return startVtsingle(instance, flags, env, cli, true)
+}
+
+// StartVtselect starts an instance of victoria-traces, which proxies queries to the
+// vtstorage nodes passed via -storageNode flag, i.e. it works as vtselect in cluster mode.
+//
+// The returned app doesn't open the local storage, so its storageDataPath is empty.
+func StartVtselect(instance string, flags, env []string, cli *Client) (*Vtsingle, error) {
+	return startVtsingle(instance, flags, env, cli, false)
+}
+
+func startVtsingle(instance string, flags, env []string, cli *Client, hasLocalStorage bool) (*Vtsingle, error) {
+	extractREs := []*regexp.Regexp{
+		httpListenAddrRE,
+		gRPCListenAddrRE,
+	}
+	if hasLocalStorage {
+		extractREs = append([]*regexp.Regexp{logsStorageDataPathRE}, extractREs...)
+	}
 	app, stderrExtracts, err := startApp(instance, "../../bin/victoria-traces-race", flags, &appOptions{
 		env: env,
 		defaultFlags: map[string]string{
@@ -56,40 +75,42 @@ func StartVtsingle(instance string, flags, env []string, cli *Client) (*Vtsingle
 			"-insert.indexFlushInterval": "2s",
 			"-search.latencyOffset":      "2s",
 		},
-		extractREs: []*regexp.Regexp{
-			logsStorageDataPathRE,
-			httpListenAddrRE,
-			gRPCListenAddrRE,
-		},
+		extractREs: extractREs,
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	storageDataPath := ""
+	if hasLocalStorage {
+		storageDataPath = stderrExtracts[0]
+		stderrExtracts = stderrExtracts[1:]
+	}
+
 	return &Vtsingle{
 		app: app,
 		ServesMetrics: &ServesMetrics{
-			metricsURL: fmt.Sprintf("http://%s/metrics", stderrExtracts[1]),
+			metricsURL: fmt.Sprintf("http://%s/metrics", stderrExtracts[0]),
 			cli:        cli,
 		},
-		storageDataPath: stderrExtracts[0],
-		httpListenAddr:  stderrExtracts[1],
+		storageDataPath: storageDataPath,
+		httpListenAddr:  stderrExtracts[0],
 
-		forceFlushURL: fmt.Sprintf("http://%s/internal/force_flush", stderrExtracts[1]),
-		forceMergeURL: fmt.Sprintf("http://%s/internal/force_merge", stderrExtracts[1]),
+		forceFlushURL: fmt.Sprintf("http://%s/internal/force_flush", stderrExtracts[0]),
+		forceMergeURL: fmt.Sprintf("http://%s/internal/force_merge", stderrExtracts[0]),
 
-		jaegerAPIServicesURL:     fmt.Sprintf("http://%s/select/jaeger/api/services", stderrExtracts[1]),
-		jaegerAPIOperationsURL:   fmt.Sprintf("http://%s/select/jaeger/api/services/%%s/operations", stderrExtracts[1]),
-		jaegerAPITracesURL:       fmt.Sprintf("http://%s/select/jaeger/api/traces", stderrExtracts[1]),
-		jaegerAPITraceURL:        fmt.Sprintf("http://%s/select/jaeger/api/traces/%%s", stderrExtracts[1]),
-		jaegerAPIDependenciesURL: fmt.Sprintf("http://%s/select/jaeger/api/dependencies", stderrExtracts[1]),
+		jaegerAPIServicesURL:     fmt.Sprintf("http://%s/select/jaeger/api/services", stderrExtracts[0]),
+		jaegerAPIOperationsURL:   fmt.Sprintf("http://%s/select/jaeger/api/services/%%s/operations", stderrExtracts[0]),
+		jaegerAPITracesURL:       fmt.Sprintf("http://%s/select/jaeger/api/traces", stderrExtracts[0]),
+		jaegerAPITraceURL:        fmt.Sprintf("http://%s/select/jaeger/api/traces/%%s", stderrExtracts[0]),
+		jaegerAPIDependenciesURL: fmt.Sprintf("http://%s/select/jaeger/api/dependencies", stderrExtracts[0]),
 
-		tempoAPISearchURL: fmt.Sprintf("http://%s/select/tempo/api/search", stderrExtracts[1]),
+		tempoAPISearchURL: fmt.Sprintf("http://%s/select/tempo/api/search", stderrExtracts[0]),
 
-		logsQLQueryURL: fmt.Sprintf("http://%s/select/logsql/query", stderrExtracts[1]),
+		logsQLQueryURL: fmt.Sprintf("http://%s/select/logsql/query", stderrExtracts[0]),
 
-		otlpTracesURL:     fmt.Sprintf("http://%s/insert/opentelemetry/v1/traces", stderrExtracts[1]),
-		otlpGRPCTracesURL: fmt.Sprintf("http://%s/opentelemetry.proto.collector.trace.v1.TraceService/Export", stderrExtracts[2]),
+		otlpTracesURL:     fmt.Sprintf("http://%s/insert/opentelemetry/v1/traces", stderrExtracts[0]),
+		otlpGRPCTracesURL: fmt.Sprintf("http://%s/opentelemetry.proto.collector.trace.v1.TraceService/Export", stderrExtracts[1]),
 	}, nil
 }
 
