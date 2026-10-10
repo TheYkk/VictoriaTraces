@@ -3,10 +3,7 @@ package tempo
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/VictoriaMetrics/VictoriaLogs/lib/logstorage"
@@ -56,7 +53,7 @@ func processProfileRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 	if params.q == "" {
 		params.q = "{}"
 	}
-	mode, err := getProfileMode(r)
+	mode, err := tracecommon.GetProfileMode(r)
 	if err != nil {
 		httpserver.Errorf(w, r, "incorrect profile mode: %s", err)
 		return
@@ -118,28 +115,6 @@ func processProfileRequest(ctx context.Context, w http.ResponseWriter, r *http.R
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	_, _ = w.Write(data)
-}
-
-func getProfileMode(r *http.Request) (string, error) {
-	mode := strings.ToLower(r.FormValue("mode"))
-	if mode == "" {
-		analyzeStr := r.FormValue("analyze")
-		if analyzeStr == "" {
-			return "explain", nil
-		}
-		analyze, err := strconv.ParseBool(analyzeStr)
-		if err != nil {
-			return "", fmt.Errorf("cannot parse analyze=%q: %w", analyzeStr, err)
-		}
-		if analyze {
-			return "analyze", nil
-		}
-		return "explain", nil
-	}
-	if mode != "explain" && mode != "analyze" {
-		return "", fmt.Errorf("unsupported mode %q; want explain or analyze", mode)
-	}
-	return mode, nil
 }
 
 func buildTraceSearchProfileStages(filterQuery *traceql.Query, start, end time.Time, limit int) ([]traceSearchProfileStage, error) {

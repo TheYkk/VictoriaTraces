@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -134,4 +135,29 @@ func getStringSliceFromRequest(r *http.Request, argName string) ([]string, error
 type Row struct {
 	Timestamp int64
 	Fields    []logstorage.Field
+}
+
+// GetProfileMode returns the query profiling mode from the `mode` or `analyze` query args at r.
+//
+// It returns either "explain" or "analyze".
+func GetProfileMode(r *http.Request) (string, error) {
+	mode := strings.ToLower(r.FormValue("mode"))
+	if mode == "" {
+		analyzeStr := r.FormValue("analyze")
+		if analyzeStr == "" {
+			return "explain", nil
+		}
+		analyze, err := strconv.ParseBool(analyzeStr)
+		if err != nil {
+			return "", fmt.Errorf("cannot parse analyze=%q: %w", analyzeStr, err)
+		}
+		if analyze {
+			return "analyze", nil
+		}
+		return "explain", nil
+	}
+	if mode != "explain" && mode != "analyze" {
+		return "", fmt.Errorf("unsupported mode %q; want explain or analyze", mode)
+	}
+	return mode, nil
 }
